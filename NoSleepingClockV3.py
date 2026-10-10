@@ -12,6 +12,20 @@ from functools import wraps
 from pathlib import Path
 import os
 import sys
+import warnings
+
+# Suppress Qt warnings
+os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.window=false'
+
+# Suppress all warnings
+warnings.filterwarnings("ignore")
+
+# Suppress urllib3 warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Configure logger to only show ERROR level and above
+logger.remove()
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QCheckBox, 
@@ -628,7 +642,7 @@ class NoSleepingClock(QMainWindow):
     
     def quit_app(self):
         logger.info("Quitting application through tray menu")
-        self.on_close()
+        self.cleanup_and_quit()
     
     def restore_window(self):
         logger.info("Restoring window from system tray")
@@ -646,6 +660,28 @@ class NoSleepingClock(QMainWindow):
                 self.hide()
         super().changeEvent(event)
     
+    def cleanup_and_quit(self):
+        """Cleanup resources and quit application"""
+        with self.lock:
+            self.running = False
+            self.timer_active = False
+
+        # Stop all threads
+        if self.awake_thread and self.awake_thread.is_alive():
+            self.awake_thread.join(timeout=0.5)
+
+        if self.weather_thread and self.weather_thread.is_alive():
+            self.weather_thread.join(timeout=0.5)
+
+        self.stop_timer()
+
+        # Stop tray icon
+        if self.tray_icon:
+            self.tray_icon.hide()
+
+        # Quit application
+        QApplication.instance().quit()
+    
     def on_close(self, event):
         reply = QMessageBox.question(self, 'Quit',
                                      'Do you want to Quit the Window?',
@@ -653,26 +689,7 @@ class NoSleepingClock(QMainWindow):
                                      QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
-            with self.lock:
-                self.running = False
-                self.timer_active = False
-
-            # Stop all threads
-            if self.awake_thread and self.awake_thread.is_alive():
-                self.awake_thread.join(timeout=2.0)
-
-            if self.weather_thread and self.weather_thread.is_alive():
-                self.weather_thread.join(timeout=2.0)
-
-            self.stop_timer()
-
-            # Stop tray icon
-            if self.tray_icon:
-                self.tray_icon.hide()
-
-            # Quit application
-            QApplication.instance().quit()
-
+            self.cleanup_and_quit()
             event.accept()
         else:
             event.ignore()
